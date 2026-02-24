@@ -1,108 +1,105 @@
+import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
-const RESTORE_PROMPT = `
-You are a professional AI photo digitizer and restorer. 
+const RESTORE_PROMPT = `You are a professional AI photo digitizer and restorer.
 TASK 1: OBJECT DETECTION & CROPPING. Detect the actual old photograph within this real-life shot. Crop out any desk, hands, or background elements. Perform perspective correction to make the photo rectangular.
-TASK 2: RESTORATION. Remove scratches, dust, and noise. Sharpen the facial details.
-TASK 3: COLORIZATION. Add natural, historically accurate colors.
-OUTPUT: Return ONLY the cropped and fully restored image.
-`;
+TASK 2: RESTORATION. Faithfully restore this image with high fidelity to modern photograph quality. Remove scratches, dust, and noise. Sharpen the facial details.
+TASK 3: COLORIZATION. Add natural, historically accurate colors in full color.
+OUTPUT: Return ONLY the cropped and fully restored image.`;
 
-const delays = [1000, 2000, 4000, 8000, 16000];
-const maxRetries = 5;
+const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+const GEMINI_MODEL = "gemini-2.5-flash-image";
+const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
 
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit
-): Promise<unknown> {
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const response = await fetch(url, options);
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text}`);
-      }
-      return await response.json();
-    } catch (error) {
-      if (i === maxRetries - 1) throw error;
-      await new Promise((res) => setTimeout(res, delays[i]));
-    }
-  }
-  throw new Error("Max retries exceeded");
+interface RestoreRequestBody {
+  data?: string;
+  mimeType?: string;
+  apiKey?: string;
 }
 
 export async function POST(req: Request) {
+  let body: RestoreRequestBody;
   try {
-    const { data: base64Data, mimeType } = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "请求数据格式错误" }, { status: 400 });
+  }
 
-    if (!base64Data || !mimeType) {
-      return NextResponse.json(
-        { error: "Missing data or mimeType" },
-        { status: 400 }
-      );
-    }
+  const { data: base64Data, mimeType, apiKey: customApiKey } = body;
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "API key not configured" },
-        { status: 500 }
-      );
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`;
-
-    const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: RESTORE_PROMPT },
-            {
-              inlineData: {
-                mimeType: mimeType || "image/jpeg",
-                data: base64Data,
-              },
-            },
-          ],
-        },
-      ],
-      generationConfig: { responseModalities: ["IMAGE"] },
-    };
-
-    const result = (await fetchWithRetry(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{
-            inlineData?: { mimeType?: string; data?: string };
-          }>;
-        };
-      }>;
-    };
-
-    const imagePart = result.candidates?.[0]?.content?.parts?.find(
-      (p) => p.inlineData
-    );
-
-    if (!imagePart?.inlineData?.data) {
-      return NextResponse.json(
-        { error: "AI did not generate an image" },
-        { status: 500 }
-      );
-    }
-
-    const imageDataUrl = `data:${imagePart.inlineData.mimeType || "image/png"};base64,${imagePart.inlineData.data}`;
-
-    return NextResponse.json({ image: imageDataUrl });
-  } catch (err) {
-    console.error("Restore API error:", err);
+  if (typeof base64Data !== "string" || !base64Data.trim()) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Restore failed" },
-      { status: 500 }
+      { error: "缺少或无效的图片数据" },
+      { status: 400 },
     );
   }
+
+  const normalizedMime = (mimeType ?? "image/jpeg").toLowerCase();
+  
+  if (
+    !ALLOWED_MIME_TYPES.includes(
+      normalizedMime as (typeof ALLOWED_MIME_TYPES)[number],
+    )
+  ) {
+    return NextResponse.json(
+      { error: "仅支持 JPG、PNG、WebP 格式的图片" },
+      { status: 400 },
+    );
+  }
+
+  const estimatedSize = (base64Data.length * 3) / 4;
+  if (estimatedSize > MAX_IMAGE_SIZE_BYTES) {
+    return NextResponse.json(
+      { error: "图片过大，请上传 20MB 以内的图片" },
+      { status: 400 },
+    );
+  }
+
+  const apiKey = customApiKey?.trim() || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: "请先在设置中配置 Gemini API 密钥" },
+      { status: 500 },
+    );
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: [
+        { inlineData: { mimeType: normalizedMime, data: base64Data } },
+        RESTORE_PROMPT,
+      ],
+      config: {
+        responseModalities: ["IMAGE"],
+      },
+    });
+  } catch (error) {
+    console.error("Error generating AI reply:", error);
+    const msg =
+      error instanceof Error && "AI 修复失败，请检查网络或稍后重试";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+
+  type PartWithInlineData = {
+    inlineData?: { mimeType?: string; data?: string };
+  };
+  const imagePart = response.candidates?.[0]?.content?.parts?.find(
+    (p: PartWithInlineData) => p.inlineData?.data,
+  ) as PartWithInlineData | undefined;
+
+  if (!imagePart?.inlineData?.data) {
+    return NextResponse.json(
+      { error: "AI 未能生成修复图像，请重试" },
+      { status: 500 },
+    );
+  }
+
+  const outMime = imagePart.inlineData.mimeType || "image/png";
+  const imageDataUrl = `data:${outMime};base64,${imagePart.inlineData.data}`;
+
+  return NextResponse.json({ image: imageDataUrl });
 }

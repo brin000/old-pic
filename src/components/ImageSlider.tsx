@@ -32,7 +32,7 @@ export default function ImageSlider({ before, after }: ImageSliderProps) {
   return (
     <div
       ref={containerRef}
-      className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden cursor-ew-resize group shadow-2xl"
+      className="group relative aspect-4/3 w-full cursor-ew-resize overflow-hidden rounded-xl"
       onMouseDown={(e) => {
         setIsDragging(true);
         handleMove(e.clientX);
@@ -48,30 +48,30 @@ export default function ImageSlider({ before, after }: ImageSliderProps) {
     >
       <img
         src={after}
-        className="absolute inset-0 w-full h-full object-contain"
-        alt="After"
+        className="absolute inset-0 h-full w-full object-contain"
+        alt="修复后"
       />
       <img
         src={before}
-        className="absolute inset-0 w-full h-full object-contain"
+        className="absolute inset-0 h-full w-full object-contain"
         style={{ clipPath: `inset(0 ${100 - sliderPosition}% 0 0)` }}
-        alt="Before"
+        alt="原图"
       />
       <div
-        className="absolute top-0 bottom-0 w-0.5 bg-white z-10"
+        className="absolute top-0 bottom-0 z-10 w-0.5 bg-white"
         style={{ left: `${sliderPosition}%` }}
       >
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-xl flex items-center justify-center">
-          <div className="flex space-x-0.5">
-            <div className="w-0.5 h-3 bg-gray-300"></div>
-            <div className="w-0.5 h-3 bg-gray-300"></div>
+        <div className="absolute top-1/2 left-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-lg">
+          <div className="flex gap-0.5">
+            <div className="h-2.5 w-0.5 rounded bg-zinc-400" />
+            <div className="h-2.5 w-0.5 rounded bg-zinc-400" />
           </div>
         </div>
       </div>
-      <div className="absolute bottom-4 left-4 text-[10px] uppercase font-bold tracking-widest bg-black/50 px-2 py-1 rounded backdrop-blur">
+      <div className="absolute bottom-3 left-3 rounded px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-300 bg-black/60 backdrop-blur-sm">
         实拍原图
       </div>
-      <div className="absolute bottom-4 right-4 text-[10px] uppercase font-bold tracking-widest bg-indigo-600/50 px-2 py-1 rounded backdrop-blur text-white">
+      <div className="absolute bottom-3 right-3 rounded px-2 py-1 text-[10px] font-medium uppercase tracking-wider bg-sky-500/80 backdrop-blur-sm text-white">
         AI 裁剪修复
       </div>
     </div>
